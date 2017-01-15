@@ -1,6 +1,6 @@
 import collections
 import random
-
+import datetime
 
 # reservation = {
 #     'customerID',
@@ -15,27 +15,6 @@ import random
 #     'placedOn',
 # }
 #
-# Event = {
-#     'conferenceID',
-#     'parentEvent',
-#     'eventType',
-#     'name',
-#     'date',
-#     'maxParticipants',
-# }
-#
-# EventTime = {
-#     'eventID',
-#     'startTime',
-#     'endTime',
-# }
-#
-# Pricing = {
-#     'eventID',
-#     'endDate',
-#     'price',
-# }
-#
 # EventReservation = {
 #     'reservationID',
 #     'eventID',
@@ -47,6 +26,16 @@ import random
 #     'eventReservationID',
 #     'personID',
 # }
+
+customers = []
+participants = []
+conferences = []
+events = []
+event_times = []
+pricings = []
+
+
+# reservations = []
 
 
 # noinspection SqlNoDataSourceInspection
@@ -78,12 +67,6 @@ def varchar(value):
     return value
 
 
-customers = []
-participants = []
-conferences = []
-reservations = []
-
-
 def generate_customers():
     global customers
     names = read_file('customer/names')
@@ -92,7 +75,7 @@ def generate_customers():
     phones = read_file('customer/phones')
     emails = read_file('customer/emails')
 
-    for i in range(0, 8000):
+    for i in range(8000):
         customer = collections.OrderedDict()
 
         customer['name'] = varchar(names[i])
@@ -106,42 +89,42 @@ def generate_customers():
 
     return generate_table_inserts('Customers', customers)
 
-# todo debug
-# def generate_participants():
-#     global customers, participants
-#     names = read_file('participant/names')
-#     surnames = read_file('participant/surnames')
-#     student_ids = read_file('participant/studentIDs')
-#
-#     ps = 0
-#     company_ps = 0
-#     for c in range(0, len(customers)):
-#         if customers[c]['is_company'] == 1:
-#             for i in range(0, random.randint(1, 5)):
-#                 participant = collections.OrderedDict()
-#
-#                 participant['customer_id'] = c + 1
-#                 participant['name'] = varchar(names[company_ps])
-#                 participant['surname'] = varchar(surnames[company_ps])
-#                 participant['is_student'] = 0 if is_null(student_ids[ps]) else 1
-#                 participant['student_id'] = varchar(student_ids[ps])
-#
-#                 participants.append(participant)
-#                 ps += 1
-#                 company_ps += 1
-#         else:
-#             participant = collections.OrderedDict()
-#
-#             participant['customer_id'] = c + 1
-#             participant['name'] = customers[c]['name']
-#             participant['surname'] = customers[c]['surname']
-#             participant['is_student'] = 0 if is_null(student_ids[ps]) else 1
-#             participant['student_id'] = student_ids[ps]
-#
-#             participants.append(participant)
-#             ps += 1
-#
-#     return generate_table_inserts('Participants', participants)
+
+def generate_participants():
+    global customers, participants
+    names = read_file('participant/names')
+    surnames = read_file('participant/surnames')
+    student_ids = read_file('participant/studentIDs')
+
+    ps = 0
+    company_ps = 0
+    for c in range(len(customers)):
+        if customers[c]['is_company'] == 1:
+            for i in range(0, random.randint(1, 5)):
+                participant = collections.OrderedDict()
+
+                participant['customer_id'] = c + 1
+                participant['name'] = varchar(names[company_ps])
+                participant['surname'] = varchar(surnames[company_ps])
+                participant['is_student'] = 0 if is_null(student_ids[ps]) else 1
+                participant['student_id'] = varchar(student_ids[ps])
+
+                participants.append(participant)
+                ps += 1
+                company_ps += 1
+        else:
+            participant = collections.OrderedDict()
+
+            participant['customer_id'] = c + 1
+            participant['name'] = customers[c]['name']
+            participant['surname'] = customers[c]['surname']
+            participant['is_student'] = 0 if is_null(student_ids[ps]) else 1
+            participant['student_id'] = varchar(student_ids[ps])
+
+            participants.append(participant)
+            ps += 1
+
+    return generate_table_inserts('Participants', participants)
 
 
 def generate_conferences():
@@ -154,7 +137,7 @@ def generate_conferences():
     websites = read_file('conference/websites')
     is_cancelleds = read_file('conference/isCancelleds')
 
-    for i in range(0, 80):
+    for i in range(80):
         conference = collections.OrderedDict()
 
         conference['name'] = varchar(names[i])
@@ -169,47 +152,129 @@ def generate_conferences():
 
     return generate_table_inserts('Conferences', conferences)
 
-#todo
+
+def parse_date(sql_string):
+    return datetime.date(
+        *map(int, sql_string.strip('\'').split('-')))
+
+
+def generate_events_event_times():
+    global conferences, events, event_times
+
+    names = read_file('event/day/names')
+
+    days = []
+    for c in range(len(conferences)):
+        start_date = parse_date(conferences[c]['start_date'])
+        end_date = parse_date(conferences[c]['end_date'])
+        conf_days = (end_date - start_date).days + 1
+        for d in range(conf_days):
+            day = collections.OrderedDict()
+
+            day['conference_id'] = c + 1
+            day['parent_event'] = 'NULL'
+            day['event_type'] = varchar('d')
+            day['name'] = varchar(random.choice(names))
+            day['date'] = varchar((start_date + datetime.timedelta(d)).isoformat())
+            day['max_participants'] = random.randint(50, 200)
+
+            days.append(day)
+
+    names = read_file('event/workshop/names')
+
+    workshops = []
+    ws = len(days)
+    for d in range(len(days)):
+        for w in range(random.randint(0, 8)):
+            workshop = collections.OrderedDict()
+
+            workshop['conference_id'] = days[d]['conference_id']
+            workshop['parent_event'] = d + 1
+            workshop['event_type'] = varchar('w')
+            workshop['name'] = varchar(random.choice(names))
+            workshop['date'] = days[d]['date']
+            workshop['max_participants'] = random.randint(10, 50)
+
+            workshops.append(workshop)
+
+            workshop_time = collections.OrderedDict()
+
+            workshop_time['event_id'] = ws + 1
+            hour = random.randint(8, 21)
+            minute = 15 * random.randint(0, 3)
+            second = 0
+            workshop_time['start_time'] = \
+                varchar('%02d:%02d:%02d' % (hour, minute, second))
+            workshop_time['end_time'] = \
+                varchar(
+                    '%02d:%02d:%02d' % (hour + random.randint(0, 3),
+                                        minute + random.choice([0, 5, 10]),
+                                        second + 0))
+            event_times.append(workshop_time)
+            ws += 1
+
+    events += days + workshops
+
+    return \
+        generate_table_inserts('Events', events) \
+        + generate_table_inserts('EventTimes', event_times)
+
+
+def generate_pricings():
+    global events, pricings
+
+    for e in range(len(events)):
+        pricing = collections.OrderedDict()
+
+        pricing['event_id'] = e + 1
+        pricing['end_date'] = events[e]['date']
+        pricing['price'] = \
+            0 if random.randrange(100) < 25 else 10 * random.randint(1, 20)
+
+        pricings.append(pricing)
+
+        if events[e]['event_type'] == '\'d\'' and pricing['price'] >= 20:
+            for p in range(random.randint(0, 3)):
+                last = pricing
+                pricing = collections.OrderedDict()
+
+                pricing['event_id'] = e + 1
+                pricing['end_date'] = \
+                    varchar((parse_date(events[e]['date']) - datetime.timedelta(random.randint(1, 30))).isoformat())
+                pricing['price'] = last['price'] * (0.5 * (1 + random.random()))
+
+                pricings.append(pricing)
+
+    return generate_table_inserts('Pricings', pricings)
+
+
 # def generate_reservations():
 #     global reservations, customers, conferences
 #
-#     names = read_file('conference/names')
-#     venues = read_file('conference/venues')
-#     start_dates = read_file('conference/startDates')
-#     end_dates = read_file('conference/endDates')
-#     student_discounts = read_file('conference/studentDiscounts')
-#     websites = read_file('conference/websites')
-#     is_cancelleds = read_file('conference/isCancelleds')
+#     for conf in range(len(conferences)):
 #
-#     for i in range(0, 80):
-#         conference = collections.OrderedDict()
+#         for r in range(random.randint()):
+#             reservation = collections.OrderedDict()
 #
-#         conference['name'] = varchar(names[i])
-#         conference['venue'] = varchar(venues[i])
-#         conference['start_date'] = varchar(start_dates[i])
-#         conference['end_date'] = varchar(end_dates[i])
-#         conference['student_discount'] = student_discounts[i]
-#         conference['website'] = varchar(websites[i])
-#         conference['is_cancelled'] = is_cancelleds[i]
 #
-#         conferences.append(conference)
 #
-#     return generate_table_inserts('Conferences', conferences)
+#         conferences.append(reservation)
+#
+#     return generate_table_inserts('Reservations', reservations)
 
 
 def main():
     sql_script = ''
     sql_script += generate_customers()
-    # sql_script += generate_participants()
+    sql_script += generate_participants()
     sql_script += generate_conferences()
+    sql_script += generate_events_event_times()
+    sql_script += generate_pricings()
     # sql_script += generate_reservations()
     # sql_script += generate_installments()
-    # sql_script += generate_events()
-    # sql_script += generate_event_times()
-    # sql_script += generate_pricings()
     # sql_script += generate_event_reservations()
     # sql_script += generate_participations()
-
+    #
     f = open('generateData.sql', 'w')
     f.write(sql_script)
     f.close()
