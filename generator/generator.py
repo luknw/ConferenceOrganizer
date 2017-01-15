@@ -2,13 +2,6 @@ import collections
 import random
 import datetime
 
-# reservation = {
-#     'customerID',
-#     'conferenceID',
-#     'placedOn',
-#     'isCancelled',
-# }
-#
 # installment = {
 #     'reservationID',
 #     'value',
@@ -33,9 +26,7 @@ conferences = []
 events = []
 event_times = []
 pricings = []
-
-
-# reservations = []
+reservations = []
 
 
 # noinspection SqlNoDataSourceInspection
@@ -153,9 +144,9 @@ def generate_conferences():
     return generate_table_inserts('Conferences', conferences)
 
 
-def parse_date(sql_string):
+def parse_date(sql_date_string):
     return datetime.date(
-        *map(int, sql_string.strip('\'').split('-')))
+        *map(int, sql_date_string.strip('\'').split('-')))
 
 
 def generate_events_event_times():
@@ -220,6 +211,10 @@ def generate_events_event_times():
         + generate_table_inserts('EventTimes', event_times)
 
 
+def subtract_days(sql_date_string, days_number):
+    return varchar((parse_date(sql_date_string) - datetime.timedelta(days_number)).isoformat())
+
+
 def generate_pricings():
     global events, pricings
 
@@ -229,7 +224,7 @@ def generate_pricings():
         pricing['event_id'] = e + 1
         pricing['end_date'] = events[e]['date']
         pricing['price'] = \
-            0 if random.randrange(100) < 25 else 10 * random.randint(1, 20)
+            0 if random.random() < 0.25 else 10 * random.randint(1, 20)
 
         pricings.append(pricing)
 
@@ -239,28 +234,29 @@ def generate_pricings():
                 pricing = collections.OrderedDict()
 
                 pricing['event_id'] = e + 1
-                pricing['end_date'] = \
-                    varchar((parse_date(events[e]['date']) - datetime.timedelta(random.randint(1, 30))).isoformat())
-                pricing['price'] = last['price'] * (0.5 * (1 + random.random()))
+                pricing['end_date'] = subtract_days(events[e]['date'], random.randint(1, 30))
+                pricing['price'] = int(last['price'] * (0.5 * (1 + random.random())))
 
                 pricings.append(pricing)
 
     return generate_table_inserts('Pricings', pricings)
 
 
-# def generate_reservations():
-#     global reservations, customers, conferences
-#
-#     for conf in range(len(conferences)):
-#
-#         for r in range(random.randint()):
-#             reservation = collections.OrderedDict()
-#
-#
-#
-#         conferences.append(reservation)
-#
-#     return generate_table_inserts('Reservations', reservations)
+def generate_reservations():
+    global reservations, customers, conferences
+
+    for conf in range(len(conferences)):
+        for customer in random.sample(range(len(customers)), random.randint(100, 300)):
+            reservation = collections.OrderedDict()
+
+            reservation['customer_id'] = customer + 1
+            reservation['conference_id'] = conf + 1
+            reservation['placed_on'] = subtract_days(conferences[conf]['start_date'], random.randint(7, 120))
+            reservation['is_cancelled'] = 0 if random.random() < 0.95 else 1
+
+            reservations.append(reservation)
+
+    return generate_table_inserts('Reservations', reservations)
 
 
 def main():
@@ -270,7 +266,7 @@ def main():
     sql_script += generate_conferences()
     sql_script += generate_events_event_times()
     sql_script += generate_pricings()
-    # sql_script += generate_reservations()
+    sql_script += generate_reservations()
     # sql_script += generate_installments()
     # sql_script += generate_event_reservations()
     # sql_script += generate_participations()
