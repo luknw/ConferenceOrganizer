@@ -2,18 +2,37 @@ import collections
 import random
 import datetime
 
-
 customers = []
 participants = []
 conferences = []
 events = []
 event_times = []
 pricings = []
-reservations = []
-event_reservations = []
 
 days = []
 workshops = []
+
+# noinspection SqlNoDataSourceInspection
+HEADER = \
+    """
+DELETE FROM Participations
+DELETE FROM Installments
+DELETE FROM Pricings
+DELETE FROM EventTimes
+DELETE FROM Participants
+DELETE FROM EventReservations
+DELETE FROM Reservations
+DELETE FROM Customers
+DELETE FROM Events
+DELETE FROM Conferences
+DBCC CHECKIDENT (Installments, RESEED, 0)
+DBCC CHECKIDENT (Participants, RESEED, 0)
+DBCC CHECKIDENT (Customers, RESEED, 0)
+DBCC CHECKIDENT (Reservations, RESEED, 0)
+DBCC CHECKIDENT (Conferences, RESEED, 0)
+DBCC CHECKIDENT (Events, RESEED, 0)
+DBCC CHECKIDENT (EventReservations, RESEED, 0)
+"""
 
 
 # noinspection SqlNoDataSourceInspection
@@ -22,8 +41,8 @@ def generate_table_inserts(table, values):
     # inserts = 'DELETE FROM %s\nDBCC CHECKIDENT (%s, RESEED, 0)' % (table, table)
     inserts = ''
     for row in values:
-        inserts += 'INSERT INTO %s VALUES (%s)\n' \
-                   % (table, ','.join(map(str, collections.OrderedDict(row).values())))
+        inserts += ('INSERT INTO %s VALUES (%s)\n'
+                    % (table, ','.join(map(str, collections.OrderedDict(row).values()))))
     return inserts
 
 
@@ -176,7 +195,7 @@ def generate_events_event_times():
             workshop_time = collections.OrderedDict()
 
             workshop_time['event_id'] = ws + 1
-            hour = random.randint(8, 21)
+            hour = random.randint(8, 20)
             minute = 15 * random.randint(0, 3)
             second = 0
             workshop_time['start_time'] = \
@@ -212,14 +231,13 @@ def generate_pricings():
             0 if random.random() < 0.25 else 10 * random.randint(1, 20)
 
         pricings.append(pricing)
-
         if events[e]['event_type'] == '\'d\'' and pricing['price'] >= 20:
             for p in range(random.randint(0, 3)):
                 last = pricing
                 pricing = collections.OrderedDict()
 
                 pricing['event_id'] = e + 1
-                pricing['end_date'] = subtract_days(events[e]['date'], random.randint(1, 30))
+                pricing['end_date'] = subtract_days(last['end_date'], random.randint(1, 30))
                 pricing['price'] = int(last['price'] * (0.5 * (1 + random.random())))
 
                 pricings.append(pricing)
@@ -228,17 +246,17 @@ def generate_pricings():
 
 
 def generate_reservations():
-    global events, reservations, participants, pricings
+    global events, participants, pricings, customers, event_times, conferences, days, workshops
 
     participant_workshops = []
     participant_days = []
 
-    workshop_participants = list(map(lambda w: w['max_participants'], workshops))
+    workshop_participants = [[] for _ in workshops]
     day_participants = [[] for _ in days]
 
     for p in range(len(participants)):
         participant_days.append(set())
-        p_w_inds = sorted(random.sample(range(len(workshops)), random.randint(0, 5)),
+        p_w_inds = sorted(random.sample(range(len(workshops)), random.randint(0, len(workshops))),
                           key=lambda i: event_times[i]['start_time'])
 
         w = 1
@@ -248,16 +266,17 @@ def generate_reservations():
 
         w = 0
         while w < len(p_w_inds):
-            workshop = p_w_inds[w]
-            workshop_day = workshops[workshop]['parent_event'] - 1
-            while workshop_participants[workshop] - 1 < 0 \
-                    or (p not in day_participants[workshop_day]
-                        and len(day_participants[workshop_day]) + 1 > days[workshop_day]['max_participants']):
-                del workshop
-            workshop_participants[workshop] -= 1
-            if p not in day_participants[workshop_day]:
-                day_participants[workshop_day].append(p)
-                participant_days[p].add(workshop_day)
+            workshop_day = workshops[p_w_inds[w]]['parent_event'] - 1
+            while w < len(p_w_inds) \
+                    and (len(workshop_participants[p_w_inds[w]]) + 1 > workshops[p_w_inds[w]]['max_participants']
+                         or (p not in day_participants[workshop_day]
+                             and len(day_participants[workshop_day]) + 1 > days[workshop_day]['max_participants'])):
+                del p_w_inds[w]
+            if w < len(p_w_inds):
+                workshop_participants[p_w_inds[w]].append(p)
+                if p not in day_participants[workshop_day]:
+                    day_participants[workshop_day].append(p)
+                    participant_days[p].add(workshop_day)
             w += 1
 
         participant_workshops.append(p_w_inds)
@@ -274,10 +293,10 @@ def generate_reservations():
     customer_workshops = [collections.Counter() for _ in customers]
 
     for p in range(len(participants)):
-        customer = participants[p]['customer_id']
-        for d in range(len(participant_days[p])):
-            customer_conferences[customer].add(days[d]['conference_id'])
-            customer_days[customer][participant_days[d]] += 1
+        customer = participants[p]['customer_id'] - 1
+        for day in participant_days[p]:
+            customer_conferences[customer].add(days[day]['conference_id'] - 1)
+            customer_days[customer][day] += 1
         for workshop in participant_workshops[p]:
             customer_workshops[customer][workshop] += 1
 
@@ -289,9 +308,9 @@ def generate_reservations():
 
     pricings = sorted(pricings, key=lambda p: p['end_date'], reverse=True)
 
-    event_pricing = {p['event_id']: [] for p in pricings}
+    event_pricing = {e: [] for e in range(len(events))}
     for pricing in pricings:
-        event_pricing[pricing['event_id']].append(pricing)
+        event_pricing[pricing['event_id'] - 1].append(pricing)
 
     rs = 0
     ers = 0
@@ -306,15 +325,8 @@ def generate_reservations():
             reservation['is_cancelled'] = 0 if random.random() < 0.95 else 1
 
             reservations.append(reservation)
-            for day in filter(lambda d: days[d]['conference_id'] == conference + 1, customer_days[customer]):
+            for day in filter(lambda d: days[d]['conference_id'] == conference + 1, customer_days[customer].keys()):
                 day_reservation = collections.OrderedDict()
-
-                p = 0
-                while p < len(event_pricing[day + 1]) - 1 \
-                        and reservation[rs]['placed_on'] <= event_pricing[day + 1][p + 1]:
-                    p += 1
-                eligible_pricing = event_pricing[day + 1][p]
-                reservation_cost += customer_days[customer][day] * eligible_pricing
 
                 day_reservation['reservation_id'] = rs + 1
                 day_reservation['event_id'] = day + 1
@@ -323,7 +335,16 @@ def generate_reservations():
 
                 day_reservations.append(day_reservation)
 
-                for participant in day_participants[day]:
+                if day_reservation['is_cancelled'] == 0:
+                    p = 0
+                    while p < len(event_pricing[day]) - 1 \
+                            and reservations[rs]['placed_on'] <= event_pricing[day][p + 1]['end_date']:
+                        p += 1
+                    eligible_price = event_pricing[day][p]['price']
+                    reservation_cost += customer_days[customer][day] * eligible_price
+
+                for participant in filter(lambda p: participants[p]['customer_id'] == customer + 1,
+                                          day_participants[day]):
                     participation = collections.OrderedDict()
 
                     participation['event_reservation_id'] = ers + 1
@@ -335,20 +356,23 @@ def generate_reservations():
                     filter(lambda w: workshops[w]['conference_id'] == conference + 1, customer_workshops[customer]):
                 workshop_reservation = collections.OrderedDict()
 
-                p = 0
-                while p < len(event_pricing[workshop + 1 + len(days)]) - 1 \
-                        and reservation[rs]['placed_on'] <= event_pricing[workshop + 1 + len(days)][p + 1]:
-                    p += 1
-                eligible_pricing = event_pricing[workshop + 1][p]
-                reservation_cost += customer_workshops[customer][workshop] * eligible_pricing
-
                 workshop_reservation['reservation_id'] = rs + 1
                 workshop_reservation['event_id'] = workshop + 1
                 workshop_reservation['participants'] = customer_workshops[customer][workshop]
                 workshop_reservation['is_cancelled'] = 0 if random.random() < 0.95 else 1
 
                 workshop_reservations.append(workshop_reservation)
-                for participant in workshop_participants[workshop]:
+
+                if workshop_reservation['is_cancelled'] == 0:
+                    p = 0
+                    while p < len(event_pricing[workshop + len(days)]) - 1 \
+                            and reservation[rs]['placed_on'] <= event_pricing[workshop + len(days)][p + 1]['end_date']:
+                        p += 1
+                    eligible_price = event_pricing[workshop][p]['price']
+                    reservation_cost += customer_workshops[customer][workshop] * eligible_price
+
+                for participant in filter(lambda p: participants[p]['customer_id'] == customer + 1,
+                                          workshop_participants[workshop]):
                     participation = collections.OrderedDict()
 
                     participation['event_reservation_id'] = ers + 1
@@ -356,57 +380,61 @@ def generate_reservations():
 
                     participations.append(participation)
                 ers += 1
-            if reservation_cost < 100:
-                if random.random() < 0.95:
-                    installment = collections.OrderedDict()
-
-                    installment['reservation_id'] = rs + 1
-                    installment['value'] = reservation_cost
-                    installment['placed_on'] = subtract_days(reservation[rs]['placed_on'], -random.randint(0, 14))
-
-                    installments.append(installment)
-            else:
-                installment_count = random.randint(1, 7)
-                zeroth = subtract_days(reservations[rs]['placed_on'], 1)
-                past = 0
-                if random.random() < 0.95:
-                    paid = 0
-                    while paid < installment_count:
+            if reservation['is_cancelled'] == 0:
+                if reservation_cost < 100:
+                    if random.random() < 0.95:
                         installment = collections.OrderedDict()
 
                         installment['reservation_id'] = rs + 1
-                        installment['value'] = reservation_cost / installment_count
-                        past += random.randint(1, (7 - past) / installment_count)
-                        installment['placed_on'] = subtract_days(zeroth, -past)
+                        installment['value'] = reservation_cost
+                        installment['placed_on'] = subtract_days(reservations[rs]['placed_on'], -random.randint(0, 14))
 
                         installments.append(installment)
-                        paid += 1
                 else:
-                    paid = 0
-                    will_pay = random.randint(0, installment_count)
-                    while paid < will_pay:
-                        installment = collections.OrderedDict()
+                    installment_count = random.randint(1, 7)
+                    zeroth = subtract_days(reservations[rs]['placed_on'], 1)
+                    past = 0
+                    if random.random() < 0.95:
+                        paid = 0
+                        rest = reservation_cost
+                        while paid < installment_count:
+                            installment = collections.OrderedDict()
 
-                        installment['reservation_id'] = rs + 1
-                        installment['value'] = reservation_cost / installment_count * (
-                            1 if random.random() < 0.95 else 2 * random.random())
-                        past += random.randint(1, 7)
-                        installment['placed_on'] = subtract_days(zeroth, -(
-                            past * (1 if random.random() < 0.95 else 2 * random.random())))
+                            installment['reservation_id'] = rs + 1
+                            installment_value = int(reservation_cost / installment_count)
+                            installment['value'] = installment_value if paid < installment_count - 1 else rest
+                            rest -= installment_value
+                            past += random.randint(1, int((7 - past) / installment_count) + 1)
+                            installment['placed_on'] = subtract_days(zeroth, -past)
 
-                        installments.append(installment)
-                        paid += 1
+                            installments.append(installment)
+                            paid += 1
+                    else:
+                        paid = 0
+                        will_pay = random.randint(0, installment_count)
+                        while paid < will_pay:
+                            installment = collections.OrderedDict()
+
+                            installment['reservation_id'] = rs + 1
+                            installment['value'] = int(reservation_cost / installment_count * (
+                                1 if random.random() < 0.95 else 2 * random.random()))
+                            past += random.randint(1, 7)
+                            installment['placed_on'] = subtract_days(zeroth, -(
+                                past * (1 if random.random() < 0.95 else 2 * random.random())))
+
+                            installments.append(installment)
+                            paid += 1
             rs += 1
 
-        return \
-            generate_table_inserts('Reservations', reservations) \
-            + generate_table_inserts('EventReservations', day_reservations + workshops_reservations) \
-            + generate_table_inserts('Participations', participations) \
-            + generate_table_inserts('Installments', installments)
+    return \
+        generate_table_inserts('Reservations', reservations) \
+        + generate_table_inserts('EventReservations', day_reservations + workshop_reservations) \
+        + generate_table_inserts('Participations', participations) \
+        + generate_table_inserts('Installments', installments)
 
 
 def main():
-    sql_script = ''
+    sql_script = HEADER
     sql_script += generate_customers()
     sql_script += generate_participants()
     sql_script += generate_conferences()
