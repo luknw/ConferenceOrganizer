@@ -38,7 +38,7 @@ DBCC CHECKIDENT (EventReservations, RESEED, 0)
 
 def generate_csv(table, values):
     csv = open('res/' + table + '.csv', mode='w')
-    csv.writelines(map(lambda row: ';'.join(map(str, collections.OrderedDict(row).values())) + '\n', values))
+    csv.writelines(map(lambda row: '|'.join(map(str, collections.OrderedDict(row).values())) + '\n', values))
     csv.close()
 
 
@@ -139,8 +139,8 @@ def generate_conferences():
         conference['id'] = i + 1
         conference['name'] = varchar(names[i])
         conference['venue'] = varchar(venues[i])
-        conference['start_date'] = varchar(start_dates[i])
-        conference['end_date'] = varchar(end_dates[i])
+        conference['start_date'] = varchar(date_time(start_dates[i]))
+        conference['end_date'] = varchar(date_time(end_dates[i]))
         conference['student_discount'] = float(student_discounts[i])
         conference['website'] = varchar(websites[i])
         conference['is_cancelled'] = int(is_cancelleds[i])
@@ -152,7 +152,11 @@ def generate_conferences():
 
 def parse_date(sql_date_string):
     return datetime.date(
-        *map(int, sql_date_string.strip('\'').split('-')))
+        *map(int, sql_date_string.split(' ')[0].strip('\'').split('/')))
+
+
+def date_time(date):
+    return date.replace('-', '/') + ' 00:00:00'
 
 
 def generate_events():
@@ -173,7 +177,7 @@ def generate_events():
             day['parent_event'] = 'NULL'
             day['event_type'] = varchar('d')
             day['name'] = varchar(random.choice(names))
-            day['date'] = varchar((start_date + datetime.timedelta(d)).isoformat())
+            day['date'] = varchar(date_time((start_date + datetime.timedelta(d)).isoformat()))
             day['max_participants'] = random.randint(50, 200)
             day['is_cancelled'] = 0 if random.random() < 0.95 else 1
 
@@ -218,18 +222,18 @@ def generate_event_times():
         minute = 15 * random.randint(0, 3)
         second = 0
         workshop_time['start_time'] = \
-            varchar('%02d:%02d:%02d' % (hour, minute, second))
+            varchar('2000/01/01 %02d:%02d:%02d' % (hour, minute, second))
         workshop_time['end_time'] = \
-            varchar('%02d:%02d:%02d' % (hour + random.randint(1, 3),
-                                        minute + random.choice([0, 5, 10]),
-                                        second + 0))
+            varchar('2000/01/01 %02d:%02d:%02d' % (hour + random.randint(1, 3),
+                                                   minute + random.choice([0, 5, 10]),
+                                                   second + 0))
         event_times[workshop_time['event_id']] = workshop_time
 
     generate_csv('EventTimes', event_times.values())
 
 
 def subtract_days(sql_date_string, days_number):
-    return varchar((parse_date(sql_date_string) - datetime.timedelta(days_number)).isoformat())
+    return varchar(date_time((parse_date(sql_date_string) - datetime.timedelta(days_number)).isoformat()))
 
 
 def generate_pricings():
@@ -385,7 +389,8 @@ def generate_reservations():
                     filter(lambda w: workshops[w]['conference_id'] == conference, customer_workshops[customer]):
                 workshop_reservation = collections.OrderedDict()
 
-                workshop_reservation['reservation_id'] = rs + 1
+                workshop_reservation['id'] = ers + 1
+                workshop_reservation['reservation_id'] = reservation['id']
                 workshop_reservation['event_id'] = workshop
                 workshop_reservation['participants'] = len(customer_workshops[customer][workshop])
                 workshop_reservation['is_cancelled'] = 0 if random.random() < 0.95 else 1
@@ -412,7 +417,7 @@ def generate_reservations():
 
                     participations.append(participation)
                 ers += 1
-            if reservation['is_cancelled'] == 0 and conferences[conference]['is_cancelled'] == 0:
+            if reservation['is_cancelled'] == 0 and conferences[conference]['is_cancelled'] == 0 and reservation_cost > 0:
                 if reservation_cost < 100:
                     if random.random() < 0.95:
                         installment = collections.OrderedDict()
@@ -422,8 +427,9 @@ def generate_reservations():
                         installment['value'] = reservation_cost
                         installment['placed_on'] = subtract_days(reservation['placed_on'], -random.randint(0, 14))
 
-                        installments.append(installment)
-                        insts += 1
+                        if installment['value'] > 0:
+                            installments.append(installment)
+                            insts += 1
                 else:
                     installment_count = random.randint(1, 7)
                     zeroth = subtract_days(reservations[rs]['placed_on'], 1)
@@ -442,9 +448,10 @@ def generate_reservations():
                             past += random.randint(1, int((7 - past) / installment_count) + 1)
                             installment['placed_on'] = subtract_days(zeroth, -past)
 
-                            installments.append(installment)
-                            insts += 1
-                            paid += 1
+                            if installment['value'] > 0:
+                                installments.append(installment)
+                                insts += 1
+                                paid += 1
                     else:
                         paid = 0
                         will_pay = random.randint(0, installment_count)
@@ -459,9 +466,10 @@ def generate_reservations():
                             installment['placed_on'] = subtract_days(zeroth, -(
                                 past * (1 if random.random() < 0.95 else 2 * random.random())))
 
-                            installments.append(installment)
-                            insts += 1
-                            paid += 1
+                            if installment['value'] > 0:
+                                installments.append(installment)
+                                insts += 1
+                                paid += 1
             rs += 1
 
     generate_csv('Reservations', reservations)
